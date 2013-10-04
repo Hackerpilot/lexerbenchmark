@@ -1,0 +1,166 @@
+diff --git a/src/module.c b/src/module.c
+index 225faf8..0ec1dbf 100644
+--- a/src/module.c
++++ b/src/module.c
+@@ -11,6 +11,7 @@
+ #include <stdio.h>
+ #include <stdlib.h>
+ #include <assert.h>
++#include <time.h>
+ 
+ #include "mars.h"
+ #include "module.h"
+@@ -496,121 +497,25 @@ void Module::parse()
+             setDocfile();
+         return;
+     }
+-    Parser p(this, buf, buflen, docfile != NULL);
+-    p.nextToken();
+-    members = p.parseModule();
+-
+-    if (srcfile->ref == 0)
+-        ::free(srcfile->buffer);
+-    srcfile->buffer = NULL;
+-    srcfile->len = 0;
+-
+-    md = p.md;
+-    numlines = p.scanloc.linnum;
+-
+-    /* The symbol table into which the module is to be inserted.
+-     */
+-    DsymbolTable *dst;
+-
+-    if (md)
+-    {   /* A ModuleDeclaration, md, was provided.
+-         * The ModuleDeclaration sets the packages this module appears in, and
+-         * the name of this module.
+-         */
+-        this->ident = md->id;
+-        this->safe = md->safe;
+-        Package *ppack = NULL;
+-        dst = Package::resolve(md->packages, &this->parent, &ppack);
+-        assert(dst);
+-#if 0
+-        if (ppack && ppack->isModule())
+-        {
+-            error(loc, "package name '%s' in file %s conflicts with usage as a module name in file %s",
+-                ppack->toChars(), srcname, ppack->isModule()->srcfile->toChars());
+-            dst = modules;
+-        }
+-#endif
+-    }
+-    else
+-    {   /* The name of the module is set to the source file name.
+-         * There are no packages.
+-         */
+-        dst = modules;          // and so this module goes into global module symbol table
+-
+-        /* Check to see if module name is a valid identifier
+-         */
+-        if (!Lexer::isValidIdentifier(this->ident->toChars()))
+-            error("has non-identifier characters in filename, use module declaration instead");
+-    }
+-
+-    // Insert module into the symbol table
+-    Dsymbol *s = this;
+-    bool isPackageMod = strcmp(srcfile->name->name(), "package.d") == 0;
+-    if (isPackageMod)
+-    {
+-        /* If the source tree is as follows:
+-         *     pkg/
+-         *     +- package.d
+-         *     +- common.d
+-         * the 'pkg' will be incorporated to the internal package tree in two ways:
+-         *     import pkg;
+-         * and:
+-         *     import pkg.common;
+-         *
+-         * If both are used in one compilation, 'pkg' as a module (== pkg/package.d)
+-         * and a package name 'pkg' will conflict each other.
+-         *
+-         * To avoid the conflict:
+-         * 1. If preceding package name insertion had occurred by Package::resolve,
+-         *    later package.d loading will change Package::isPkgMod to PKGmodule and set Package::mod.
+-         * 2. Otherwise, 'package.d' wrapped by 'Package' is inserted to the internal tree in here.
+-         */
+-        Package *p = new Package(ident);
+-        p->parent = this->parent;
+-        p->isPkgMod = PKGmodule;
+-        p->mod = this;
+-        p->symtab = new DsymbolTable();
+-        s = p;
+-    }
+-    if (!dst->insert(s))
+-    {
+-        /* It conflicts with a name that is already in the symbol table.
+-         * Figure out what went wrong, and issue error message.
+-         */
+-        Dsymbol *prev = dst->lookup(ident);
+-        assert(prev);
+-        Module *mprev = prev->isModule();
+-        if (mprev)
+-        {
+-            if (strcmp(srcname, mprev->srcfile->toChars()) == 0)
+-                error(loc, "from file %s must be imported as module '%s'",
+-                    srcname, toPrettyChars());
+-            else
+-                error(loc, "from file %s conflicts with another module %s from file %s",
+-                    srcname, mprev->toChars(), mprev->srcfile->toChars());
+-        }
+-        else
+-        {
+-            Package *pkg = prev->isPackage();
+-            assert(pkg);
+-            if (pkg->isPkgMod == PKGunknown && isPackageMod)
+-            {
+-                /* If the previous inserted Package is not yet determined as package.d,
+-                 * link it to the actual module.
+-                 */
+-                pkg->isPkgMod = PKGmodule;
+-                pkg->mod = this;
+-            }
+-            else
+-                error(pkg->loc, "from file %s conflicts with package name %s",
+-                    srcname, pkg->toChars());
+-        }
+-    }
+-    else
+-    {
+-        // Add to global array of all modules
+-        amodules.push(this);
+-    }
++	timespec t;
++	long times[200];
++	int tokenCount;
++	for (int i = 0; i < 200; i++)
++	{
++		tokenCount = 0;
++		Parser p(this, buf, buflen, docfile != NULL);
++		clock_gettime(CLOCK_PROCESS_CPUTIME_ID, &t);
++		times[i] = t.tv_nsec;
++		while (p.nextToken() != TOKeof)
++			tokenCount++;
++		clock_gettime(CLOCK_PROCESS_CPUTIME_ID, &t);
++		times[i] = t.tv_nsec - times[i];
++	}
++	double total = 0.0;
++	for (int j = 0; j < 200; j++)
++		total += times[j];
++	printf("%s\t%f\n", srcname, (total / 200.0) / (1000 * 100));
++	exit(0);
+ }
+ 
+ void Module::importAll(Scope *prevsc)
+diff --git a/src/posix.mak b/src/posix.mak
+index 7ea5b7f..3dbd5cc 100644
+--- a/src/posix.mak
++++ b/src/posix.mak
+@@ -53,7 +53,7 @@ endif
+ ifeq (OSX,$(OS))
+     export MACOSX_DEPLOYMENT_TARGET=10.3
+ endif
+-LDFLAGS=-lm -lstdc++ -lpthread
++LDFLAGS=-lm -lstdc++ -lpthread -lrt
+ 
+ #ifeq (OSX,$(OS))
+ #	HOST_CC=clang++
